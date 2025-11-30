@@ -3,8 +3,12 @@ import cv2
 import numpy as np
 import face_recognition
 from ultralytics import YOLO
+import supervision as sv
 
-model = YOLO("tools_medium_480.pt")
+tracker = sv.ByteTrack(track_activation_threshold=0.2, minimum_matching_threshold=0.7, lost_track_buffer=90)
+box_annotator = sv.BoxAnnotator()
+label_annotator = sv.LabelAnnotator()
+trace_annotator = sv.TraceAnnotator()
 
 video_capture = cv2.VideoCapture(1)
 
@@ -61,6 +65,28 @@ def get_depth_at_point(frame, x: int, y:int):
 cv2.namedWindow("Depth")
 cv2.setMouseCallback("Depth", on_mouse)
 
+def object_tracking_annotated_frame(frame: np.ndarray):
+    results = model(frame)[0]
+    detections = sv.Detections.from_ultralytics(results)
+    detections = tracker.update_with_detections(detections)
+
+    if "class_name" not in detections.data:
+        return frame
+        
+    labels = [
+        f"#{tracker_id} {class_name}"
+        for class_name, tracker_id
+        in zip(detections.data["class_name"], detections.tracker_id)
+    ]
+
+    annotated_frame = box_annotator.annotate(
+        frame.copy(), detections=detections)
+    annotated_frame = label_annotator.annotate(
+        annotated_frame, detections=detections, labels=labels)
+    return trace_annotator.annotate(
+        annotated_frame, detections=detections)
+
+
 while True:
     depth_frame = get_depth_frame()
     kinect_color_frame = get_video()
@@ -116,7 +142,7 @@ while True:
 
     cv2.imshow('RGB', kinect_color_frame)
     cv2.imshow('Depth', depth_frame / 2048)  # simple visualization
-    cv2.imshow('Detections', detection_frame)
+    cv2.imshow('Detections', object_tracking_annotated_frame(kinect_color_frame.copy()))
     cv2.imshow('Video', frame)
     
     left_depth = get_depth_at_point(depth_frame, 485, 367)
