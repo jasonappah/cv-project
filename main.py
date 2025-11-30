@@ -2,6 +2,9 @@ import freenect
 import cv2
 import numpy as np
 import face_recognition
+from ultralytics import YOLO
+
+model = YOLO("tools.pt")
 
 video_capture = cv2.VideoCapture(1)
 
@@ -60,8 +63,13 @@ cv2.setMouseCallback("Depth", on_mouse)
 
 while True:
     depth_frame = get_depth_frame()
-    rgb = get_video()
+    kinect_color_frame = get_video()
     ret, frame = video_capture.read()
+    
+    results = model.predict(kinect_color_frame, imgsz=(480, 640))
+    detection_frame = kinect_color_frame.copy()
+    for result in results:
+        detection_frame = result.plot(img=detection_frame)
     
     rgb_frame = frame[:, :, ::-1]
     small = cv2.resize(rgb_frame, (0, 0), fx=0.25, fy=0.25)
@@ -106,8 +114,9 @@ while True:
         font = cv2.FONT_HERSHEY_DUPLEX
         cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
 
-    cv2.imshow('RGB', rgb)
+    cv2.imshow('RGB', kinect_color_frame)
     cv2.imshow('Depth', depth_frame / 2048)  # simple visualization
+    cv2.imshow('Detections', detection_frame)
     cv2.imshow('Video', frame)
     
     left_depth = get_depth_at_point(depth_frame, 485, 367)
@@ -147,5 +156,3 @@ while True:
         break
 
 cv2.destroyAllWindows()
-
-c
