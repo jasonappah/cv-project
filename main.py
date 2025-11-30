@@ -4,7 +4,7 @@ import numpy as np
 import face_recognition
 from ultralytics import YOLO
 
-model = YOLO("tools_med.pt")
+model = YOLO("tools_medium_480.pt")
 
 video_capture = cv2.VideoCapture(1)
 
