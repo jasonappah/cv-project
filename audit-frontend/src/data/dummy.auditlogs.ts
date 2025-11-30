@@ -49,6 +49,7 @@ export const dummyEvents: Event[] = [
             name: "Tool 1",
             description: "Tool 1 description",
             imageUrl: randomImageUrl,
+            type: "Computer"
         },
         eventImageUrl: randomImageUrl,
     }
