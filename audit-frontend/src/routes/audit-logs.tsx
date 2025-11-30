@@ -37,33 +37,8 @@ import {
 } from '@/components/ui/pagination'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { SystemOverview, Event } from '@/data/dummy.auditlogs'
 
-type Event = {
-  id: string
-  timestamp: number
-  type: 'tool_checkin' | 'tool_checkout'
-  user: {
-    id: string
-    name: string
-    email: string
-    imageUrl: string
-  }
-  tool: {
-    id: string
-    name: string
-    description: string
-    imageUrl: string
-    type: string
-    cost: number
-  }
-  eventImageUrl: string
-}
-
-type SystemOverview = {
-  toolsCount: number
-  usersWithCheckedOutToolsCount: number
-  toolsUnseenInLast7DaysCount: number
-}
 
 export const Route = createFileRoute('/audit-logs')({
   component: AuditLogsDashboard,
@@ -76,6 +51,7 @@ function AuditLogsDashboard() {
 
   // Filter state
   const [eventTypeFilter, setEventTypeFilter] = useState<string>('all')
+  const [toolTypeFilter, setToolTypeFilter] = useState<string>('all')
   const [userSearch, setUserSearch] = useState('')
   const [toolSearch, setToolSearch] = useState('')
 
@@ -106,6 +82,12 @@ function AuditLogsDashboard() {
     fetchData()
   }, [])
 
+  // Extract unique tool types
+  const uniqueToolTypes = useMemo(() => {
+    const types = new Set(events.map((event) => event.tool.type))
+    return Array.from(types).sort()
+  }, [events])
+
   // Filter events
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
@@ -133,21 +115,27 @@ function AuditLogsDashboard() {
         }
       }
 
+      // Tool type filter
+      if (toolTypeFilter !== 'all' && event.tool.type !== toolTypeFilter) {
+        return false
+      }
+
       return true
     })
-  }, [events, eventTypeFilter, userSearch, toolSearch])
+  }, [events, eventTypeFilter, toolTypeFilter, userSearch, toolSearch])
 
   // Pagination
   const totalPages = Math.ceil(filteredEvents.length / pageSize)
   const paginatedEvents = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize
     return filteredEvents.slice(startIndex, startIndex + pageSize)
-  }, [filteredEvents, currentPage, pageSize])
+  }, [filteredEvents, currentPage])
 
   // Reset to page 1 when filters change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: We intentionally want to reset pagination when any filter changes
   useEffect(() => {
     setCurrentPage(1)
-  }, [eventTypeFilter, userSearch, toolSearch])
+  }, [eventTypeFilter, toolTypeFilter, userSearch, toolSearch])
 
   if (loading) {
     return (
@@ -252,6 +240,22 @@ function AuditLogsDashboard() {
                   <SelectItem value="all">All Events</SelectItem>
                   <SelectItem value="tool_checkin">Check In</SelectItem>
                   <SelectItem value="tool_checkout">Check Out</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full sm:w-48">
+              <Select value={toolTypeFilter} onValueChange={setToolTypeFilter}>
+                <SelectTrigger>
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Tool Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {uniqueToolTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -378,7 +382,8 @@ function AuditLogsDashboard() {
                           </PaginationLink>
                         </PaginationItem>
                       )
-                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                    }
+                    if (page === currentPage - 2 || page === currentPage + 2) {
                       return (
                         <PaginationItem key={page}>
                           <PaginationEllipsis />

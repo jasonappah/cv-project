@@ -1,4 +1,4 @@
-type Event = {
+export type Event = {
     id: string;
     timestamp: number;
     type: "tool_checkin" | "tool_checkout",
@@ -19,7 +19,7 @@ type Event = {
     eventImageUrl: string
 }
 
-type SystemOverview = {
+export type SystemOverview = {
     toolsCount: number;
     usersWithCheckedOutToolsCount: number;
     toolsUnseenInLast7DaysCount: number;
