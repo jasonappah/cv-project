@@ -6,6 +6,7 @@ from ultralytics import YOLO
 import supervision as sv
 
 from tool_state import InventoryStateManager
+model = YOLO("tools_medium_480.pt")
 tracker = sv.ByteTrack(track_activation_threshold=0.2, minimum_matching_threshold=0.7, lost_track_buffer=90)
 box_annotator = sv.BoxAnnotator()
 label_annotator = sv.LabelAnnotator()
