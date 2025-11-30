@@ -5,7 +5,7 @@ import face_recognition
 from ultralytics import YOLO
 import supervision as sv
 
-from tool_state import InventoryStateManager
+from tool_state import InventoryStateManager, DrawerOpenState
 model = YOLO("tools_medium_480.pt")
 tracker = sv.ByteTrack(track_activation_threshold=0.2, minimum_matching_threshold=0.7, lost_track_buffer=90)
 box_annotator = sv.BoxAnnotator()
@@ -17,6 +17,7 @@ video_capture = cv2.VideoCapture(1)
 state_manager = InventoryStateManager()
 
 clicked_point = None
+previous_drawer_identifier = None
 
 def on_mouse(event, x, y, flags, param):
     global clicked_point
@@ -66,6 +67,42 @@ def get_depth_at_point(frame, x: int, y:int):
     depth = frame[y, x]
     return depth
 
+def get_drawer_identifier_from_depth(left_depth: int, right_depth: int) -> str | None:
+    """
+    Maps depth values to drawer identifiers based on depth ranges.
+    Returns drawer identifier string or None if no drawer is open.
+    """
+    # Check right drawer first
+    if 890 > right_depth > 861:
+        return "sanding and scales"
+    if 860 > right_depth > 841:
+        return "clamps"
+    if 840 > right_depth > 826:
+        return "electrical and hot glue"
+    if 825 > right_depth > 801:
+        return "sockets and allen keys"
+    if 800 > right_depth > 780:
+        return "drivers and bits"
+    
+    # Check left drawer
+    if 890 > left_depth > 861:
+        return "drill and dremmel"
+    if 860 > left_depth > 841:
+        return "measruing"
+    if 840 > left_depth > 826:
+        return "hammers"
+    if 825 > left_depth > 801:
+        return "pliers and cutters"
+    if 800 > left_depth > 780:
+        return "drivers and bits"
+    
+    # No drawer open (depth indicates closed state)
+    if 920 > right_depth > 891 or 920 > left_depth > 891:
+        return None
+    
+    # Default: no drawer open if depth doesn't match any range
+    return None
+
 cv2.namedWindow("Depth")
 cv2.setMouseCallback("Depth", on_mouse)
 
@@ -80,7 +117,7 @@ def object_tracking_annotated_frame(frame: np.ndarray):
     labels = [
         f"#{tracker_id} {class_name}"
         for class_name, tracker_id
-        in zip(detections.data["class_name"], detections.tracker_id)
+        in zip(detections.data["class_name"], detections.tracker_id or [])
     ]
 
     annotated_frame = box_annotator.annotate(
@@ -101,6 +138,29 @@ while True:
     for result in results:
         detection_frame = result.plot(img=detection_frame)
     
+    # Get tracked detections for tool state management
+    tracked_results = model(kinect_color_frame)[0]
+    tracked_detections = sv.Detections.from_ultralytics(tracked_results)
+    tracked_detections = tracker.update_with_detections(tracked_detections)
+    
+    # Extract tool detections in format "{class_name} {tracker_id}"
+    tool_detection_set = set()
+    if "class_name" in tracked_detections.data and tracked_detections.tracker_id is not None:
+        tracker_ids = tracked_detections.tracker_id
+        for class_name, tracker_id in zip(tracked_detections.data["class_name"], tracker_ids):
+            if tracker_id is not None:
+                tool_detection_set.add(f"{class_name} {tracker_id}")
+    
+    # Update tool detection state if drawer is open
+    if isinstance(state_manager.tool_detection_state, DrawerOpenState):
+        drawer_state = state_manager.tool_detection_state
+        if drawer_state.detailed_state == "waiting_for_initial_tool_detection":
+            # Update initial tool detection state
+            drawer_state.initial_tool_detection_state = tool_detection_set.copy()
+        elif drawer_state.detailed_state == "watching_for_tool_checkin_or_checkout":
+            # Update current tool detection state
+            drawer_state.current_tool_detection_state = tool_detection_set.copy()
+    
     rgb_frame = frame[:, :, ::-1]
     small = cv2.resize(rgb_frame, (0, 0), fx=0.25, fy=0.25)
     
@@ -113,6 +173,9 @@ while True:
     
     face_locations = face_recognition.face_locations(small)
     face_encodings = face_recognition.face_encodings(small, face_locations)
+    
+    # Track detected user for this frame
+    detected_user = None
     
        # Loop through each face in this frame of video
     for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
@@ -135,6 +198,8 @@ while True:
         best_match_index = np.argmin(face_distances)
         if matches[best_match_index]:
             name = known_face_names[best_match_index]
+            # Convert name string to User object and update state manager
+            detected_user = InventoryStateManager.make_user_from_string(name)
 
         # Draw a box around the face
         cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
@@ -143,6 +208,9 @@ while True:
         cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
         font = cv2.FONT_HERSHEY_DUPLEX
         cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
+    
+    # Update state manager with detected user (or None if no face detected)
+    state_manager.update_currently_detected_user(detected_user)
 
     cv2.imshow('RGB', kinect_color_frame)
     cv2.imshow('Depth', depth_frame / 2048)  # simple visualization
@@ -152,35 +220,32 @@ while True:
     left_depth = get_depth_at_point(depth_frame, 485, 367)
     right_depth = get_depth_at_point(depth_frame, 243,385)
     
+    # Get current drawer identifier from depth
+    current_drawer_identifier = get_drawer_identifier_from_depth(left_depth, right_depth)
     
+    # Handle drawer state transitions
+    if previous_drawer_identifier != current_drawer_identifier:
+        # Transition from no drawer to drawer open
+        if previous_drawer_identifier is None and current_drawer_identifier is not None:
+            state_manager.transition_to_drawer_open(current_drawer_identifier)
+        # Transition from drawer open to no drawer
+        elif previous_drawer_identifier is not None and current_drawer_identifier is None:
+            state_manager.transition_to_no_drawer_open()
+        # Transition from one drawer to different drawer
+        elif previous_drawer_identifier is not None and current_drawer_identifier is not None and previous_drawer_identifier != current_drawer_identifier:
+            state_manager.transition_to_no_drawer_open()
+            state_manager.transition_to_drawer_open(current_drawer_identifier)
+        
+        previous_drawer_identifier = current_drawer_identifier
+    
+    # Debug output (keeping original print statements for reference)
     # print(left_depth)
     print(right_depth)
     
-    if  920 > right_depth > 891:
+    if current_drawer_identifier is None:
         print("no drawer open")
-    if 890 > right_depth > 861:
-        print("sanding and scales")
-    if 860 > right_depth > 841:
-        print("clamps")
-    if 840 > right_depth > 826:
-        print("electrical and hot glue")
-    if 825 > right_depth > 801:
-        print("sockets and allen keys")
-    if 800 > right_depth > 780:
-        print("drivers and bits")
-        
-    if  920 > left_depth > 891:
-        print("no drawer open")
-    if 890 > left_depth > 861:
-        print("drill and dremmel")
-    if 860 > left_depth > 841:
-        print("measruing")
-    if 840 > left_depth > 826:
-        print("hammers")
-    if 825 > left_depth > 801:
-        print("pliers and cutters")
-    if 800 > left_depth > 780:
-        print("drivers and bits")
+    else:
+        print(current_drawer_identifier)
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
