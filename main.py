@@ -12,6 +12,25 @@ trace_annotator = sv.TraceAnnotator()
 
 video_capture = cv2.VideoCapture(1)
 
+"""
+# key is the class, value is a dict where the key is the drawer identifier and the value is the count of that class in that 
+current_inventory: dict[str, dict[str, int]] = {}
+
+global_states:
+  - no_drawer_open
+  - drawer_open:
+        drawer_identifier
+        user
+        tool_detection_state: 
+            - drawer_opened_waiting_for_initial_tool_detection: # getting initial drawer state on open so we can diff against the state when the drawer closes. for this, we should wait for the list of tools to be stable for 1 second before auto transitioning to drawer_opened_tools_detected state.
+                initial_tool_detection_state: set of f"{class_name} {tracker_id}"
+            - drawer_opened_tools_detected # now people can add or remove tools to the drawer. need to have some heuristic for this to handle the drawer closing, so that tool_detection_state is not updated when the drawer is closing since that could incorrectly indicate that all the tools were removed.
+                tool_detection_state: set of f"{class_name} {tracker_id}"
+
+side effects:
+on transition from drawer_opened_tools_detected to no_drawer_open, diff the initial_tool_detection_state and the tool_detection_state to get the list of tools that were added or removed. then "commit" the new state to the current inventory with the new state.
+"""
+
 clicked_point = None
 
 def on_mouse(event, x, y, flags, param):
