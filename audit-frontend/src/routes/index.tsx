@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import {
   Zap,
   Server,
@@ -8,7 +8,14 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-export const Route = createFileRoute('/')({ component: App })
+export const Route = createFileRoute('/')({
+  beforeLoad: () => {
+    throw redirect({
+      to: '/audit-logs',
+    })
+  },
+  component: App,
+})
 
 function App() {
   const features = [
